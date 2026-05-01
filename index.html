@@ -1019,6 +1019,46 @@ const QRGen = (() => {
   </div>
 </div>
 
+<!-- ═══ AMAZON ARAMA PANELİ ═══ -->
+<div class="overlay" id="amazonOverlay" onclick="if(event.target===this)closeAmazonPanel()">
+  <div class="modal modal-lg" style="max-width:680px">
+    <button class="modal-close" onclick="closeAmazonPanel()">&#x2715;</button>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+      <span style="font-size:28px">🛒</span>
+      <div>
+        <div style="font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:700;color:var(--amber)">Amazon'da Ara</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:2px">Kitap, yazar veya ISBN ile arama yapın</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <input type="text" id="amazonSearchInput" class="form-input" placeholder="Kitap adı, yazar veya ISBN..." style="flex:1;min-width:0"
+        onkeydown="if(event.key==='Enter')runAmazonSearch()" />
+      <button class="btn btn-primary" onclick="runAmazonSearch()" style="flex-shrink:0">🔍 Ara</button>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">
+      <button class="filter-chip active" id="amzChipTR" onclick="setAmazonRegion('tr',this)">Amazon.com.tr</button>
+      <button class="filter-chip" id="amzChipCOM" onclick="setAmazonRegion('com',this)">🌍 Amazon.com</button>
+    </div>
+    <div id="amazonBookSuggestions" style="margin-bottom:14px">
+      <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px">📚 Kütüphanenizden seç</div>
+      <div style="position:relative">
+        <input type="text" id="amazonLibFilter" class="form-input" placeholder="Kütüphanede kitap ara..." style="width:100%"
+          oninput="filterAmazonLib(this.value)" onfocus="showAmazonDropdown()" />
+        <div id="amazonLibDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:200;background:var(--ink2);border:1px solid var(--border);border-radius:var(--r);max-height:200px;overflow-y:auto;box-shadow:var(--shadow)"></div>
+      </div>
+    </div>
+    <div id="amazonResultArea" style="background:var(--ink3);border:1px solid var(--border);border-radius:var(--r2);padding:18px;text-align:center;color:var(--text3);font-size:13px">
+      Arama yapmak için yukarıya yazın ve <strong>Ara</strong>'ya basın.
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="amazonOpenTab()" id="amazonOpenBtn" style="flex:1;justify-content:center" disabled>🔗 Amazon'da Aç</button>
+      <button class="btn btn-secondary" onclick="amazonCopyLink()" id="amazonCopyBtn" style="flex:1;justify-content:center" disabled>📋 Linki Kopyala</button>
+      <button class="btn btn-ghost" onclick="amazonSaveToForm()" id="amazonSaveBtn" style="flex:1;justify-content:center;display:none">💾 Forma Kaydet</button>
+    </div>
+    <div id="amazonCopyFeedback" style="font-size:12px;color:var(--green);text-align:center;margin-top:8px;display:none">&#x2705; Link panoya kopyalandı!</div>
+  </div>
+</div>
+
 <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="toggleSidebar()"></div>
 
 <!-- SIDEBAR -->
@@ -1046,6 +1086,7 @@ const QRGen = (() => {
     <div class="nav-section">Araçlar</div>
     <div class="nav-item" tabindex="0" onclick="_pageHistory=[];showPage('loans')" onkeydown="if(event.key==='Enter'){_pageHistory=[];showPage('loans')}"><span class="nav-icon">🔄</span> Ödünç Takibi <span class="nav-badge" id="loansBadge" style="display:none">0</span></div>
     <div class="nav-item" tabindex="0" onclick="_pageHistory=[];showPage('import')" onkeydown="if(event.key==='Enter'){_pageHistory=[];showPage('import')}"><span class="nav-icon">📥</span> Veri Aktar</div>
+    <div class="nav-item" tabindex="0" onclick="openAmazonPanel()" onkeydown="if(event.key==='Enter')openAmazonPanel()"><span class="nav-icon">🛒</span> Amazon'da Ara</div>
 
     <div class="nav-section">Sistem</div>
     <div class="nav-item" tabindex="0" onclick="_pageHistory=[];showPage('settings')" onkeydown="if(event.key==='Enter'){_pageHistory=[];showPage('settings')}"><span class="nav-icon">⚙️</span> Ayarlar</div>
@@ -1558,6 +1599,7 @@ genre,location,status,rating,read_status,language</pre>
       <button class="bmenu-item" onclick="closeBottomMenu();_pageHistory=[];showPage('stats_page')"><span>📊</span>İstatistik</button>
       <button class="bmenu-item" onclick="closeBottomMenu();_pageHistory=[];showPage('loans')"><span>🔄</span>Ödünç</button>
       <button class="bmenu-item" onclick="closeBottomMenu();_pageHistory=[];showPage('import')"><span>📥</span>Aktar</button>
+      <button class="bmenu-item" onclick="closeBottomMenu();openAmazonPanel()"><span>🛒</span>Amazon</button>
       <button class="bmenu-item" onclick="closeBottomMenu();_pageHistory=[];showPage('settings')"><span>⚙️</span>Ayarlar</button>
       <button class="bmenu-item" onclick="closeBottomMenu();toggleTheme()"><span id="bnavThemeIcon">🌙</span>Tema</button>
     </div>
@@ -3469,9 +3511,150 @@ function searchAmazon() {
   const isbn=document.getElementById('f_isbn').value.trim().replace(/[-\s]/g,'');
   const q=isbn||(title+(author?' '+author:''));
   if(!q){toast('Önce kitap adı veya ISBN girin','error');return;}
-  window.open('https://www.amazon.com.tr/s?k='+encodeURIComponent(q),'_blank','noopener');
-  toast('Amazon açıldı','info');
+  openAmazonPanel(q);
 }
+
+// ── AMAZON PANEL ─────────────────────────────────────────────────────────────
+let _amazonRegion = 'tr';
+let _amazonCurrentUrl = '';
+
+function openAmazonPanel(prefillQuery) {
+  const overlay = document.getElementById('amazonOverlay');
+  if(!overlay) return;
+  overlay.classList.add('open');
+  buildAmazonSuggestions();
+  if(prefillQuery) {
+    const inp = document.getElementById('amazonSearchInput');
+    if(inp){ inp.value = prefillQuery; runAmazonSearch(); }
+  } else {
+    document.getElementById('amazonSearchInput')?.focus();
+  }
+}
+
+function closeAmazonPanel() {
+  document.getElementById('amazonOverlay')?.classList.remove('open');
+}
+
+function setAmazonRegion(region, btn) {
+  _amazonRegion = region;
+  document.querySelectorAll('#amazonOverlay .filter-chip').forEach(c=>c.classList.remove('active'));
+  btn.classList.add('active');
+  const q = document.getElementById('amazonSearchInput')?.value.trim();
+  if(q) runAmazonSearch();
+}
+
+function buildAmazonUrl(query) {
+  const q = encodeURIComponent(query);
+  if(_amazonRegion === 'tr') return 'https://www.amazon.com.tr/s?k=' + q + '&i=stripbooks';
+  return 'https://www.amazon.com/s?k=' + q + '&i=stripbooks';
+}
+
+function runAmazonSearch() {
+  const inp = document.getElementById('amazonSearchInput');
+  const q = inp?.value.trim();
+  if(!q){ toast('Arama terimi girin','error'); return; }
+  _amazonCurrentUrl = buildAmazonUrl(q);
+  const regionLabels = {tr:'Amazon.com.tr', com:'🌍 Amazon.com'};
+  const label = regionLabels[_amazonRegion] || 'Amazon';
+  const resultArea = document.getElementById('amazonResultArea');
+  resultArea.innerHTML = '<div style="text-align:left">' +
+    '<div style="font-size:12px;color:var(--text3);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.07em">Arama sonuçları</div>' +
+    '<div style="display:flex;align-items:center;gap:10px;background:var(--ink2);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;margin-bottom:10px">' +
+    '<span style="font-size:20px">🛒</span>' +
+    '<div style="flex:1;min-width:0">' +
+    '<div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + q + '</div>' +
+    '<div style="font-size:11px;color:var(--text3);margin-top:2px">' + label + ' &middot; Kitaplar kategorisi</div>' +
+    '</div><span style="font-size:18px">📚</span></div>' +
+    '<div style="font-size:12px;color:var(--text2);line-height:1.6">🔗 Oluşturulan link:<br>' +
+    '<span style="font-family:monospace;font-size:11px;color:var(--amber);word-break:break-all">' + _amazonCurrentUrl + '</span></div></div>';
+  const openBtn = document.getElementById('amazonOpenBtn');
+  const copyBtn = document.getElementById('amazonCopyBtn');
+  const saveBtn = document.getElementById('amazonSaveBtn');
+  if(openBtn) openBtn.disabled = false;
+  if(copyBtn) copyBtn.disabled = false;
+  if(saveBtn) saveBtn.style.display = document.getElementById('f_title') ? 'flex' : 'none';
+}
+
+function amazonOpenTab() {
+  if(!_amazonCurrentUrl){ toast('Önce arama yapın','error'); return; }
+  window.open(_amazonCurrentUrl, '_blank', 'noopener');
+  toast('Arama sayfası açıldı','info');
+}
+
+async function amazonCopyLink() {
+  if(!_amazonCurrentUrl){ toast('Önce arama yapın','error'); return; }
+  try {
+    await navigator.clipboard.writeText(_amazonCurrentUrl);
+    const fb = document.getElementById('amazonCopyFeedback');
+    if(fb){ fb.style.display='block'; setTimeout(()=>fb.style.display='none',2500); }
+  } catch(e) {
+    const ta = document.createElement('textarea');
+    ta.value = _amazonCurrentUrl; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+    toast('Link kopyalandı','success');
+  }
+}
+
+function amazonSaveToForm() {
+  const urlInput = document.getElementById('f_buy_url');
+  if(urlInput && _amazonCurrentUrl){
+    urlInput.value = _amazonCurrentUrl;
+    toast('Link forma eklendi','success');
+    closeAmazonPanel();
+  }
+}
+
+function buildAmazonSuggestions() {
+  filterAmazonLib('');
+}
+
+function filterAmazonLib(term) {
+  const dd = document.getElementById('amazonLibDropdown');
+  if(!dd || !books || !books.length) return;
+  const t = term.trim().toLowerCase();
+  const filtered = books.filter(b =>
+    !t || b.title.toLowerCase().includes(t) || (b.author||'').toLowerCase().includes(t)
+  ).slice(0, 30);
+  dd.innerHTML = '';
+  if(!filtered.length) {
+    dd.innerHTML = '<div style="padding:10px 14px;font-size:13px;color:var(--text3)">Sonuç bulunamadı</div>';
+  } else {
+    filtered.forEach(b => {
+      const item = document.createElement('div');
+      item.style.cssText = 'padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px;color:var(--text)';
+      item.innerHTML = '<span style="font-weight:500">' + b.title + '</span>' +
+        (b.author ? '<span style="color:var(--text3);font-size:11px;margin-left:6px">— ' + b.author + '</span>' : '');
+      item.addEventListener('mouseenter', () => item.style.background = 'var(--vellum)');
+      item.addEventListener('mouseleave', () => item.style.background = '');
+      item.addEventListener('click', () => {
+        const q = b.title + (b.author ? ' ' + b.author : '');
+        const inp = document.getElementById('amazonSearchInput');
+        if(inp) inp.value = q;
+        const libInp = document.getElementById('amazonLibFilter');
+        if(libInp) libInp.value = b.title;
+        hideAmazonDropdown();
+        runAmazonSearch();
+      });
+      dd.appendChild(item);
+    });
+  }
+  dd.style.display = 'block';
+}
+
+function showAmazonDropdown() {
+  const libInp = document.getElementById('amazonLibFilter');
+  filterAmazonLib(libInp ? libInp.value : '');
+}
+
+function hideAmazonDropdown() {
+  const dd = document.getElementById('amazonLibDropdown');
+  if(dd) dd.style.display = 'none';
+}
+
+document.addEventListener('click', e => {
+  const area = document.getElementById('amazonBookSuggestions');
+  if(area && !area.contains(e.target)) hideAmazonDropdown();
+});
 
 // ═══════════════════════════════ CUSTOM DIALOGS (confirm/prompt yerine) ═══════════════════════════════
 function appConfirm({ icon='⚠️', title='Emin misiniz?', msg='', okLabel='Evet', okClass='btn-danger', cancelLabel='İptal' } = {}) {
