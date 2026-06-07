@@ -3105,20 +3105,24 @@
       const gfMul = (a, b) => a && b ? EXP[LOG[a] + LOG[b]] : 0;
       function makeGen(n) { let g = [1]; for (let i = 0; i < n; i++) { const r = new Array(g.length + 1).fill(0); for (let j = 0; j < g.length; j++) { r[j] ^= gfMul(g[j], 1); r[j + 1] ^= gfMul(g[j], EXP[i]); } g = r; } return g; }
       function rsEncode(data, n) { const gen = makeGen(n); const ex = [...data, ...new Array(n).fill(0)]; for (let i = 0; i < data.length; i++) { const c = ex[i]; if (c) for (let j = 0; j < gen.length; j++)ex[i + j] ^= gfMul(gen[j], c); } return ex.slice(data.length); }
-      const VINFO = [null, { d: 16, e: 10, b: 1 }, { d: 28, e: 16, b: 1 }, { d: 44, e: 26, b: 2 }, { d: 64, e: 18, b: 2 }, { d: 86, e: 24, b: 2 }, { d: 108, e: 16, b: 4 }, { d: 124, e: 18, b: 4 }, { d: 154, e: 22, b: 4 }, { d: 182, e: 22, b: 5 }, { d: 216, e: 26, b: 6 }];
+      const VINFO = [null, { d: 16, e: 10, b: 1 }, { d: 28, e: 16, b: 1 }, { d: 44, e: 26, b: 1 }, { d: 64, e: 18, b: 2 }, { d: 86, e: 24, b: 2 }, { d: 108, e: 16, b: 4 }, { d: 124, e: 18, b: 4 }, { d: 154, e: 22, b: 4 }, { d: 182, e: 22, b: 5 }, { d: 216, e: 26, b: 5 }];
+      // Alignment-pattern centre coordinates by version (null = none for v1).
+      const ALIGN = [null, null, [6, 18], [6, 22], [6, 26], [6, 30], [6, 34], [6, 22, 38], [6, 24, 42], [6, 26, 46], [6, 28, 50]];
       function encode(text) {
         const bytes = Array.from(new TextEncoder().encode(text));
-        let ver = 1; for (; ver <= 10; ver++) { if (VINFO[ver].d >= bytes.length + 3) break; } if (ver > 10) ver = 10;
+        // Pick the smallest version whose data capacity fits mode(4) + count + payload bits.
+        let ver = 1; for (; ver <= 10; ver++) { const cb = ver >= 10 ? 16 : 8; if (4 + cb + bytes.length * 8 <= VINFO[ver].d * 8) break; } if (ver > 10) throw new Error('QR: text too long');
         const info = VINFO[ver], size = ver * 4 + 17;
         const bits = [], pushBits = (v, n) => { for (let i = n - 1; i >= 0; i--)bits.push((v >> i) & 1); };
-        pushBits(0b0100, 4); pushBits(bytes.length, 8); bytes.forEach(b => pushBits(b, 8));
+        // Byte-mode character count is 8 bits for versions 1-9, 16 bits for 10+.
+        pushBits(0b0100, 4); pushBits(bytes.length, ver >= 10 ? 16 : 8); bytes.forEach(b => pushBits(b, 8));
         for (let i = 0; i < 4 && bits.length < info.d * 8; i++)bits.push(0);
         while (bits.length % 8) bits.push(0);
         const pad = [236, 17]; let pi = 0, dwords = [];
         for (let i = 0; i < bits.length; i += 8)dwords.push((bits[i] << 7) | (bits[i + 1] << 6) | (bits[i + 2] << 5) | (bits[i + 3] << 4) | (bits[i + 4] << 3) | (bits[i + 5] << 2) | (bits[i + 6] << 1) | bits[i + 7]);
         while (dwords.length < info.d) dwords.push(pad[pi++ % 2]);
         const bsize = Math.floor(info.d / info.b), rem = info.d % info.b, blocks = []; let pos = 0;
-        for (let i = 0; i < info.b; i++) { const len = bsize + (i < rem ? 1 : 0); blocks.push(dwords.slice(pos, pos + len)); pos += len; }
+        for (let i = 0; i < info.b; i++) { const len = bsize + (i >= info.b - rem ? 1 : 0); blocks.push(dwords.slice(pos, pos + len)); pos += len; }
         const ecblocks = blocks.map(b => rsEncode(b, info.e)), final = [];
         const maxb = Math.max(...blocks.map(b => b.length));
         for (let i = 0; i < maxb; i++)blocks.forEach(b => { if (i < b.length) final.push(b[i]); });
@@ -3128,9 +3132,18 @@
         function setM(r, c, v) { mat[r][c] = v; res[r][c] = true; }
         function finder(r, c) { for (let dr = -1; dr <= 7; dr++)for (let dc = -1; dc <= 7; dc++) { if (r + dr < 0 || r + dr >= size || c + dc < 0 || c + dc >= size) continue; const io = dr >= 0 && dr <= 6 && dc >= 0 && dc <= 6, ii = dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4, ob = dr === 0 || dr === 6 || dc === 0 || dc === 6; setM(r + dr, c + dc, io && (ob || ii) ? 1 : 0); } }
         finder(0, 0); finder(0, size - 7); finder(size - 7, 0);
-        for (let i = 8; i < size - 8; i++) { setM(6, i, i % 2 === 0 ? 1 : 0); setM(i, 6, i % 2 === 0 ? 1 : 0); }
+        // Alignment patterns (versions >= 2), skipping the three that collide with finders.
+        const aligns = ALIGN[ver];
+        if (aligns) { const last = aligns[aligns.length - 1]; for (const ar of aligns) for (const ac of aligns) { if ((ar === 6 && ac === 6) || (ar === 6 && ac === last) || (ar === last && ac === 6)) continue; for (let dr = -2; dr <= 2; dr++)for (let dc = -2; dc <= 2; dc++) { const ring = Math.max(Math.abs(dr), Math.abs(dc)); setM(ar + dr, ac + dc, (ring === 0 || ring === 2) ? 1 : 0); } } }
+        // Timing patterns fill the cells not already taken by an alignment pattern.
+        for (let i = 8; i < size - 8; i++) { if (!res[6][i]) setM(6, i, i % 2 === 0 ? 1 : 0); if (!res[i][6]) setM(i, 6, i % 2 === 0 ? 1 : 0); }
         setM(size - 8, 8, 1);
-        const fmtBits = [1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0];
+        // Format information: EC level M (00) + mask pattern 3 (011), BCH(15,5) with the 0x5412 mask.
+        const fmtData = (0b00 << 3) | 0b011;
+        let fmtD = fmtData << 10; const fmtG = 0b10100110111;
+        for (let i = 14; i >= 10; i--) if ((fmtD >> i) & 1) fmtD ^= fmtG << (i - 10);
+        const fmtVal = ((fmtData << 10) | fmtD) ^ 0b101010000010010;
+        const fmtBits = []; for (let i = 0; i < 15; i++) fmtBits.push((fmtVal >> i) & 1);
         [[8, 0], [8, 1], [8, 2], [8, 3], [8, 4], [8, 5], [8, 7], [8, 8], [7, 8], [5, 8], [4, 8], [3, 8], [2, 8], [1, 8], [0, 8]].forEach(([r, c], i) => setM(r, c, fmtBits[i]));
         [[size - 1, 8], [size - 2, 8], [size - 3, 8], [size - 4, 8], [size - 5, 8], [size - 6, 8], [size - 7, 8], [8, size - 8], [8, size - 7], [8, size - 6], [8, size - 5], [8, size - 4], [8, size - 3], [8, size - 2], [8, size - 1]].forEach(([r, c], i) => setM(r, c, fmtBits[i]));
         const mask = (r, c) => ((r + c) % 3 === 0);
@@ -4330,7 +4343,7 @@ genre,location,status,rating,read_status,language</pre>
         } else {
           const { data, error } = await sb.auth.signUp({ email, password });
           if (error) throw error;
-          if (data.user && !data.user.identities?.length === 0) {
+          if (data.user && ((data.user.identities && data.user.identities.length === 0) || !data.session)) {
             // E-posta dogrulama gerekebilir
             showAuthSuccess('Kayit tamamlandi! E-postanizi kontrol edin (dogrulama gerekiyorsa).');
             switchAuthTab('login');
@@ -4607,11 +4620,11 @@ genre,location,status,rating,read_status,language</pre>
       if (status !== 'all') list = list.filter(b => b.status === status);
       if (genreF) list = list.filter(b => b.genre === genreF);
       if (authorF) list = list.filter(b => b.author === authorF);
-      if (search) list = list.filter(b => b.title.toLowerCase().includes(search) || b.author.toLowerCase().includes(search) || (b.isbn || '').includes(search) || (b.description || '').toLowerCase().includes(search) || (b.genre || '').toLowerCase().includes(search));
+      if (search) list = list.filter(b => (b.title || '').toLowerCase().includes(search) || (b.author || '').toLowerCase().includes(search) || (b.isbn || '').includes(search) || (b.description || '').toLowerCase().includes(search) || (b.genre || '').toLowerCase().includes(search));
       if (sortBy === 'newest') list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
       else if (sortBy === 'oldest') list.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-      else if (sortBy === 'title') list.sort((a, b) => a.title.localeCompare(b.title, 'tr'));
-      else if (sortBy === 'author') list.sort((a, b) => a.author.localeCompare(b.author, 'tr'));
+      else if (sortBy === 'title') list.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'tr'));
+      else if (sortBy === 'author') list.sort((a, b) => (a.author || '').localeCompare(b.author || '', 'tr'));
       else if (sortBy === 'rating') list.sort((a, b) => (b.rating || 0) - (a.rating || 0));
       return list;
     }
@@ -5006,7 +5019,7 @@ genre,location,status,rating,read_status,language</pre>
       const q = (document.getElementById('hl_book_search').value || '').toLowerCase().trim();
       const dd = document.getElementById('hl_book_dropdown');
       const filtered = q ? books.filter(b => b.title.toLowerCase().includes(q) || (b.author || '').toLowerCase().includes(q)) : [...books];
-      filtered.sort((a, b) => a.title.localeCompare(b.title, 'tr'));
+      filtered.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'tr'));
       dd.innerHTML = filtered.length ? filtered.map(b => `
     <div onclick="selectHlBook('${b.id}')" style="padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--border);min-height:44px;display:flex;flex-direction:column;justify-content:center"
          onmouseover="this.style.background='var(--vellum2)'" onmouseout="this.style.background=''">
@@ -5357,6 +5370,7 @@ genre,location,status,rating,read_status,language</pre>
     let scannerStream = null;
     let nativeScanLoop = null;
     let nativeDetector = null;
+    let _scanHandled = false; // ensures a single decode is acted on before teardown completes
     let nativeVideoEl = null;
 
     async function _stopNative() {
@@ -5375,6 +5389,7 @@ genre,location,status,rating,read_status,language</pre>
       if (stopBtn) stopBtn.style.display = '';
       resultEl.innerHTML = '<p style="text-align:center;color:var(--text2);font-size:13px;margin-top:12px">📷 Kamera başlatılıyor...</p>';
       document.getElementById('isbnLookupStatus').style.display = 'none';
+      _scanHandled = false;
 
       if (scanner) { try { await scanner.stop(); } catch (e) { } try { scanner.clear(); } catch (e) { } scanner = null; }
       await _stopNative();
@@ -5440,7 +5455,8 @@ genre,location,status,rating,read_status,language</pre>
           if (vid.readyState < 2) return;
           try {
             const codes = await nativeDetector.detect(vid);
-            if (codes && codes.length > 0) {
+            if (codes && codes.length > 0 && !_scanHandled) {
+              _scanHandled = true;
               const best = codes[0];
               stopScanner();
               handleScanResult(best.rawValue, { result: { format: { formatName: best.format.toUpperCase() } } });
@@ -5473,7 +5489,7 @@ genre,location,status,rating,read_status,language</pre>
       const boxW = isBarcode ? Math.min(300, Math.floor(containerW * 0.85)) : Math.min(220, Math.floor(containerW * 0.65));
       const boxH = isBarcode ? Math.floor(boxW * 0.28) : boxW;
       const config = { fps: 25, qrbox: { width: boxW, height: boxH }, disableFlip: true };
-      const onSuccess = (decodedText, decodedResult) => { stopScanner(); handleScanResult(decodedText, decodedResult); };
+      const onSuccess = (decodedText, decodedResult) => { if (_scanHandled) return; _scanHandled = true; stopScanner(); handleScanResult(decodedText, decodedResult); };
       const onError = () => { };
       const tryStart = async (constraint) => scanner.start(constraint, config, onSuccess, onError);
       try { await tryStart({ facingMode: { exact: 'environment' } }); }
@@ -5562,7 +5578,7 @@ genre,location,status,rating,read_status,language</pre>
         if (olBook) {
           const coverUrl = olBook.cover?.large || olBook.cover?.medium || `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`;
           statusEl.style.display = 'none';
-          showISBNFetchResult({ isbn, title: olBook.title || '', authors: (olBook.authors || []).map(a => a.name).join(', '), publisher: (olBook.publishers || []).map(p => p.name).join(', ') || '', year: olBook.publish_date ? parseInt(olBook.publish_date.replace(/\D/g, '').slice(0, 4)) || null : null, pages: olBook.number_of_pages || null, coverUrl });
+          showISBNFetchResult({ isbn, title: olBook.title || '', authors: (olBook.authors || []).map(a => a.name).join(', '), publisher: (olBook.publishers || []).map(p => p.name).join(', ') || '', year: olBook.publish_date ? (parseInt((olBook.publish_date.match(/\d{4}/) || [])[0]) || null) : null, pages: olBook.number_of_pages || null, coverUrl });
         } else {
           statusEl.innerHTML = `<span style="color:var(--red)">❌ ISBN bulunamadı: ${esc(isbn)}</span>`;
           setTimeout(() => statusEl.style.display = 'none', 3000); showISBNNotFound(isbn);
@@ -6008,11 +6024,11 @@ genre,location,status,rating,read_status,language</pre>
         '<div style="display:flex;align-items:center;gap:10px;background:var(--ink2);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;margin-bottom:10px">' +
         '<span style="font-size:20px">🛒</span>' +
         '<div style="flex:1;min-width:0">' +
-        '<div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + q + '</div>' +
+        '<div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(q) + '</div>' +
         '<div style="font-size:11px;color:var(--text3);margin-top:2px">' + label + ' &middot; Kitaplar kategorisi</div>' +
         '</div><span style="font-size:18px">📚</span></div>' +
         '<div style="font-size:12px;color:var(--text2);line-height:1.6">🔗 Oluşturulan link:<br>' +
-        '<span style="font-family:monospace;font-size:11px;color:var(--amber);word-break:break-all">' + _amazonCurrentUrl + '</span></div></div>';
+        '<span style="font-family:monospace;font-size:11px;color:var(--amber);word-break:break-all">' + esc(_amazonCurrentUrl) + '</span></div></div>';
       const openBtn = document.getElementById('amazonOpenBtn');
       const copyBtn = document.getElementById('amazonCopyBtn');
       const saveBtn = document.getElementById('amazonSaveBtn');
@@ -6068,8 +6084,8 @@ genre,location,status,rating,read_status,language</pre>
         filtered.forEach(b => {
           const item = document.createElement('div');
           item.style.cssText = 'padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px;color:var(--text)';
-          item.innerHTML = '<span style="font-weight:500">' + b.title + '</span>' +
-            (b.author ? '<span style="color:var(--text3);font-size:11px;margin-left:6px">— ' + b.author + '</span>' : '');
+          item.innerHTML = '<span style="font-weight:500">' + esc(b.title) + '</span>' +
+            (b.author ? '<span style="color:var(--text3);font-size:11px;margin-left:6px">— ' + esc(b.author) + '</span>' : '');
           item.addEventListener('mouseenter', () => item.style.background = 'var(--vellum)');
           item.addEventListener('mouseleave', () => item.style.background = '');
           item.addEventListener('click', () => {
@@ -6226,7 +6242,7 @@ genre,location,status,rating,read_status,language</pre>
         el.innerHTML = `<div style="padding:20px;background:var(--ink2);border:1px solid var(--border);border-radius:var(--r2);text-align:center;color:var(--text3);font-size:13px">Henüz hedef belirlenmedi. <button onclick="openGoalModal()" style="background:none;border:none;color:var(--amber);cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;text-decoration:underline">Hedef Belirle →</button></div>`;
         return;
       }
-      const readThisYear = books.filter(b => b.read_status === 'read').length;
+      const readThisYear = books.filter(b => b.read_status === 'read' && b.created_at && new Date(b.created_at).getFullYear() === goal.year).length;
       const pct = Math.min(100, Math.round(readThisYear / goal.target * 100));
       const r = 54, cx = 70, cy = 70, circ = 2 * Math.PI * r, dash = (pct / 100) * circ;
       el.innerHTML = `<div style="background:var(--ink2);border:1px solid var(--border);border-radius:var(--r2);padding:20px;display:flex;align-items:center;gap:24px;flex-wrap:wrap">
@@ -6465,7 +6481,7 @@ genre,location,status,rating,read_status,language</pre>
           if (olBook) {
             const coverUrl = olBook.cover?.large || olBook.cover?.medium || `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`;
             if (statusEl) statusEl.style.display = 'none';
-            showISBNFetchResult({ isbn, title: olBook.title || '', authors: (olBook.authors || []).map(a => a.name).join(', '), publisher: (olBook.publishers || []).map(p => p.name).join(', ') || '', year: olBook.publish_date ? parseInt(olBook.publish_date.replace(/\D/g, '').slice(0, 4)) || null : null, pages: olBook.number_of_pages || null, coverUrl });
+            showISBNFetchResult({ isbn, title: olBook.title || '', authors: (olBook.authors || []).map(a => a.name).join(', '), publisher: (olBook.publishers || []).map(p => p.name).join(', ') || '', year: olBook.publish_date ? (parseInt((olBook.publish_date.match(/\d{4}/) || [])[0]) || null) : null, pages: olBook.number_of_pages || null, coverUrl });
             return;
           }
         }
@@ -6555,21 +6571,28 @@ genre,location,status,rating,read_status,language</pre>
     }
     async function importBooks() {
       if (!_importPreviewData.length) { toast('Veri yok', 'error'); return; }
-      let added = 0, skipped = 0;
-      const toInsert = [];
+      let skipped = 0;
+      const newBooks = [];
       _importPreviewData.forEach(row => {
         if (!row.title || !row.author) { skipped++; return; }
         const dup = books.find(b => (row.isbn && b.isbn === row.isbn) || (b.title === row.title && b.author === row.author));
         if (dup) { skipped++; return; }
-        const newBook = { ...row, id: 'imp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9), created_at: new Date().toISOString() };
-        books.unshift(newBook); toInsert.push(newBook); added++;
+        newBooks.push({ ...row, id: 'imp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9), created_at: new Date().toISOString() });
       });
-      if (demoMode) { saveDemo(); }
-      else if (sb && toInsert.length) {
-        const userId = await getCurrentUserId();
-        if (userId) toInsert.forEach(b => b.user_id = userId);
-        await sb.from('books').insert(toInsert);
-      }
+      let added = 0;
+      if (demoMode) {
+        newBooks.forEach(b => books.unshift(b)); added = newBooks.length; saveDemo();
+      } else if (sb) {
+        if (newBooks.length) {
+          const userId = await getCurrentUserId();
+          if (!userId) { toast('Oturum açılmamış, lütfen giriş yapın', 'error'); return; }
+          const toInsert = newBooks.map(({ id, ...rest }) => ({ ...rest, user_id: userId }));
+          const { data, error } = await sb.from('books').insert(toInsert).select();
+          if (error) { toast('İçe aktarma hatası: ' + (error.message || error), 'error'); return; }
+          // Use the DB-assigned rows (real ids) so later edit/delete target the right records.
+          (data || []).forEach(b => books.unshift(b)); added = (data || []).length;
+        }
+      } else { toast('Önce Supabase\'e bağlanın veya Demo Mod kullanın', 'error'); return; }
       _importPreviewData = []; const el = document.getElementById('importPreview'); if (el) el.innerHTML = '';
       renderAll(); toast(`İçe aktarıldı: ${added} eklendi, ${skipped} atlandı`, 'success');
     }
